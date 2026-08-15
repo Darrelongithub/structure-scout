@@ -62,6 +62,7 @@ export interface AnalysisContext {
   byDatetime: Map<string, Candle>;
   ema50: (number | undefined)[];
   ema200: (number | undefined)[];
+  blocks: import("./indicators").SessionBlock[];
   spread: number;
 }
 
