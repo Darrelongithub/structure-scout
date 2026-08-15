@@ -10,9 +10,14 @@ Single page at `/`:
 2. **Validation gate** — blocks analysis and shows `INVALID FILE: missing metadata field [name]` if any of `data_age`, `spread_convention`, `atr_method`, `similar_swing_selection_rule` is missing/empty. Also shows the parsed metadata once valid.
 3. **Summary panel** — `data_age` shown prominently (raw value plus how old it is versus now in days/hours, styled as a warning when stale), total candles analyzed, total INVALID rows, per-strategy pass count, per-strategy fail counts grouped by reason, a multi-strategy overlap flag (e.g. "3 candles passed 2+ strategies", naming those candles and which strategies — nothing merged or resolved, just surfaced), and a ranked list of all PASSing setups sorted by RR descending.
 4. **Results table** — every strategy × relevant candle: datetime, strategy, PASS/FAIL, reason, trend context, entry, SL, TP, RR. Filter by strategy name and by result. Virtualized/paginated for up to ~5,000 rows.
-5. **Export button** — downloads the final PASSing setups as CSV.
+5. **Zero-PASS state** — if nothing passes, summary and table show an explicit "0 setups passed" state with the fail-reason breakdown still visible, not an empty/broken-looking table.
 
-**Zero-PASS state.** If nothing passes, the summary and table show an explicit "0 setups passed" state with the fail-reason breakdown still visible, rather than an empty broken-looking table; export is disabled with that reason.
+## Auto-export (no button)
+
+- The moment analysis finishes, a file download is triggered automatically — no click.
+- Format `.txt`, containing everything: the full summary data and the full results table (every strategy × candle, PASS/FAIL, reason, trend, entry/SL/TP/RR) — not just passing setups. Sectioned as `=== SUMMARY ===` then `=== RESULTS ===`.
+- Filename comes from the datetime of the last row in the uploaded CSV, as date + time (e.g. `2026-08-14_1700.txt`), so same-day re-runs don't overwrite.
+- Additive: the on-screen summary and table stay.
 
 ## Analysis pipeline
 
@@ -28,11 +33,21 @@ Single page at `/`:
 
 **Math (PASS results only).** Entry/SL/TP are exact values pulled from actual OHLC rows. `spread_convention` from metadata is applied only at this final step. `RR = (TP − Entry) / (Entry − SL)`, spread-adjusted. RR ≤ 1:2 flips the result to FAIL with reason `RR below 1:2 threshold` and removes it from the passing list.
 
+## UI style
+
+Dark, blue-accented "terminal/trading desk" look:
+
+- Card-based sections on a dark background, each with a colored left accent bar and a small square icon badge (blue background, white icon) top-left.
+- Bold white section headers with a gray subtitle line describing format (e.g. "Analysis Output · TXT · Auto-download").
+- Rounded dark input/dropdown fields for the strategy and PASS/FAIL filters.
+- Small status indicator (colored dot + label): "Ready" / "Analyzing..." / "Complete".
+- Blue accents throughout (icon backgrounds, accent bars, active text) — no red/pink accent theme.
+
 ## Technical notes
 
 - Route: rewrite `src/routes/index.tsx` with its own `head()` metadata (title/description/og/twitter).
-- Pure TypeScript analysis modules under `src/lib/analyzer/`: `parse.ts` (CSV + metadata), `types.ts`, `structure.ts` (trend + swing resolution), `indicators.ts` (EMA 50/200, pivots, fib, session grouping), `strategies/` (one file per strategy exporting a common `StrategyCheck` signature), `run.ts` (orchestrates steps 1–4), `export.ts` (CSV download).
+- Pure TypeScript analysis modules under `src/lib/analyzer/`: `parse.ts` (CSV + metadata), `types.ts`, `structure.ts` (trend + swing resolution), `indicators.ts` (EMA 50/200, pivots, fib, session grouping), `strategies/` (one file per strategy exporting a common `StrategyCheck` signature), `run.ts` (orchestrates all steps), `export.ts` (auto-download .txt generation).
 - Runs synchronously in the browser on upload (under 5,000 rows), with a progress state while computing.
-- UI from existing shadcn primitives + semantic design tokens in `src/styles.css`; a distinct dark "terminal/trading desk" palette and typography added as tokens rather than hardcoded colors.
+- UI from existing shadcn primitives + semantic design tokens in `src/styles.css`; the blue dark palette added as tokens rather than hardcoded colors.
 - Unit tests for the parser, structure detection, RR/spread math, and the unresolved-swing-reference path.
 - One test file per strategy: all 13 get at least a PASS case and a FAIL case asserting the exact reason string, built from synthetic rows.
