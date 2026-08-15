@@ -1,17 +1,6 @@
-import { blockContaining, pivotLevels, previousBlock, sessionBlocks, type SessionBlock } from "../indicators";
+import { blockContaining, pivotLevels, previousBlock } from "../indicators";
 import { fail, pass, requireFields, valid } from "./util";
 import type { StrategyCheck } from "../types";
-
-const cache = new WeakMap<object, SessionBlock[]>();
-
-function blocks(ctx: { candles: unknown[] }): SessionBlock[] {
-  const key = ctx as object;
-  const existing = cache.get(key);
-  if (existing) return existing;
-  const computed = sessionBlocks((ctx as { candles: never[] }).candles);
-  cache.set(key, computed);
-  return computed;
-}
 
 export const pivotRejection: StrategyCheck = {
   id: "pivot_rejection",
@@ -22,7 +11,7 @@ export const pivotRejection: StrategyCheck = {
     const missing = requireFields(c, ["isReliable", "session", "upperWickPct", "lowerWickPct"]);
     if (missing) return missing;
     if (!c.isReliable) return fail("is_reliable = false");
-    const all = blocks(ctx);
+    const all = ctx.blocks;
     const own = blockContaining(all, i);
     if (!own) return fail("candle is not inside a resolvable session block");
     const prior = previousBlock(all, own.start);
@@ -33,17 +22,16 @@ export const pivotRejection: StrategyCheck = {
       { name: "Pivot", value: pivot },
       { name: "R1", value: r1 },
     ];
-    const tolerance = (prior.high - prior.low) * 0.1;
     for (const level of levels) {
       const touchedHigh = c.high! >= level.value && c.close! < level.value;
       const touchedLow = c.low! <= level.value && c.close! > level.value;
-      if (touchedHigh && Math.abs(c.high! - level.value) <= tolerance + (prior.high - prior.low)) {
+      if (touchedHigh) {
         if (c.upperWickPct! < 50) return fail(`upper_wick_pct ${c.upperWickPct}% below 50% at ${level.name}`);
         const below = levels.filter((l) => l.value < c.close!).sort((a, b) => b.value - a.value)[0];
         if (!below) return fail(`no lower pivot level below close to target from ${level.name}`);
         return pass(`rejected ${level.name} at ${level.value.toFixed(5)}`, "short", c.close!, c.high!, below.value);
       }
-      if (touchedLow && Math.abs(level.value - c.low!) <= tolerance + (prior.high - prior.low)) {
+      if (touchedLow) {
         if (c.lowerWickPct! < 50) return fail(`lower_wick_pct ${c.lowerWickPct}% below 50% at ${level.name}`);
         const above = levels.filter((l) => l.value > c.close!).sort((a, b) => a.value - b.value)[0];
         if (!above) return fail(`no higher pivot level above close to target from ${level.name}`);
