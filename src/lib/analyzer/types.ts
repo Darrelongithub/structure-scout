@@ -19,41 +19,41 @@ export const METADATA_FIELDS = [
 export interface Candle {
   index: number;
   datetime: string;
-  open?: number;
-  high?: number;
-  low?: number;
-  close?: number;
-  direction?: string;
-  body?: number;
-  upperWick?: number;
-  lowerWick?: number;
-  range?: number;
-  bodyPercentOfRange?: number;
-  upperWickPct?: number;
-  lowerWickPct?: number;
-  displacement?: string;
-  isReliable?: boolean;
-  localAvgRange?: number;
-  session?: string;
-  atr30m?: number;
-  similarSwingRetracePct?: number;
-  similarSwingContinuedPct?: number;
+  open?: number | undefined;
+  high?: number | undefined;
+  low?: number | undefined;
+  close?: number | undefined;
+  direction?: string | undefined;
+  body?: number | undefined;
+  upperWick?: number | undefined;
+  lowerWick?: number | undefined;
+  range?: number | undefined;
+  bodyPercentOfRange?: number | undefined;
+  upperWickPct?: number | undefined;
+  lowerWickPct?: number | undefined;
+  displacement?: string | undefined;
+  isReliable?: boolean | undefined;
+  localAvgRange?: number | undefined;
+  session?: string | undefined;
+  atr30m?: number | undefined;
+  similarSwingRetracePct?: number | undefined;
+  similarSwingContinuedPct?: number | undefined;
   similarSwingRefs: string[];
   unresolvedRefs: string[];
-  swingInvalidated?: boolean;
-  reliableStreakLength?: number;
+  swingInvalidated?: boolean | undefined;
+  reliableStreakLength?: number | undefined;
   trend: Trend;
-  invalid?: string;
+  invalid?: string | undefined;
   raw: Record<string, string>;
 }
 
 export interface Outcome {
   result: ResultStatus;
   reason: string;
-  entry?: number;
-  sl?: number;
-  tp?: number;
-  side?: "long" | "short";
+  entry?: number | undefined;
+  sl?: number | undefined;
+  tp?: number | undefined;
+  side?: "long" | "short" | undefined;
 }
 
 export interface AnalysisContext {
@@ -79,11 +79,11 @@ export interface ResultRow {
   result: ResultStatus;
   reason: string;
   trend: Trend;
-  entry?: number;
-  sl?: number;
-  tp?: number;
-  rr?: number;
-  side?: "long" | "short";
+  entry?: number | undefined;
+  sl?: number | undefined;
+  tp?: number | undefined;
+  rr?: number | undefined;
+  side?: "long" | "short" | undefined;
 }
 
 export interface OverlapEntry {
