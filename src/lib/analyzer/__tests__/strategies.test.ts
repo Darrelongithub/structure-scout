@@ -255,7 +255,9 @@ describe("11 — Opening Range Breakout + Retest", () => {
   it("passes when the breakout is retested by a reliable candle", () => {
     const result = outcome(openingRange, base, 2);
     expect(result.result).toBe("PASS");
-    expect(result.sl).toBeCloseTo(100.6);
+    // Stop sits beyond the retest extreme, always below a long entry.
+    expect(result.sl).toBeCloseTo(100.5);
+    expect(result.sl!).toBeLessThan(result.entry!);
   });
 
   it("fails when the retest candle is unreliable", () => {
@@ -264,6 +266,14 @@ describe("11 — Opening Range Breakout + Retest", () => {
     expect(outcome(openingRange, specs, 2).reason).toBe(
       "retest candle at +1 has is_reliable = false",
     );
+  });
+
+  it("fails instead of emitting an SL above a long entry when the retest closes back inside", () => {
+    const specs = structuredClone(base);
+    specs[3]!.c = 100.5; // closes below the 100.6 opening-range high
+    const result = outcome(openingRange, specs, 2);
+    expect(result.result).toBe("FAIL");
+    expect(result.reason).toContain("failed breakout, not a retest");
   });
 });
 
