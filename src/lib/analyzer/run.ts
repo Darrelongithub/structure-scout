@@ -79,10 +79,17 @@ export function runAnalysis(text: string): RunOutcome {
           row.entry = math.entry;
           row.sl = math.sl;
           row.tp = math.tp;
-          row.rr = math.rr;
-          if (math.rr <= RR_THRESHOLD) {
+          if (math.invalidReason || math.rr === undefined) {
+            // No RR at all when risk is non-positive; never report a faked positive.
+            row.rr = undefined;
+            row.result = "FAIL";
+            row.reason = math.invalidReason ?? "INVALID: RR not computable";
+          } else {
+            row.rr = math.rr;
+            if (math.rr <= RR_THRESHOLD) {
             row.result = "FAIL";
             row.reason = RR_FAIL_REASON;
+            }
           }
         }
       }
