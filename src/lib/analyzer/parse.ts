@@ -66,7 +66,42 @@ function refs(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-/** First non-empty line is the JSON metadata header; the next line is the CSV header. */
+const DEFAULT_MARKERS = ["===", "---", "###", "***", "~~~"];
+
+/**
+ * Reads the generator's `section_marker_convention` text and pulls out the literal
+ * marker tokens it documents (any run of 2+ symbol characters). Falls back to the
+ * common markers when the field is absent or purely descriptive.
+ */
+export function sectionMarkers(convention: string | undefined): string[] {
+  const found = convention ? (convention.match(/[=\-#*~_+>|]{2,}/g) ?? []) : [];
+  const tokens = [...new Set(found)].filter((t) => t.length >= 2);
+  return tokens.length > 0 ? tokens : DEFAULT_MARKERS;
+}
+
+/** True when a raw CSV line is a section/day divider rather than a candle row. */
+export function isDividerLine(line: string, cells: string[], markers: string[]): boolean {
+  const trimmed = line.trim();
+  if (trimmed === "") return true;
+  const first = (cells[0] ?? "").trim();
+  for (const marker of markers) {
+    if (trimmed.startsWith(marker) || trimmed.endsWith(marker) || first.startsWith(marker)) {
+      return true;
+    }
+  }
+  // Safety net: a divider never carries numeric OHLC cells, so a row without any
+  // numeric cell is a divider, not an INVALID candle row.
+  const hasNumericCell = cells.some((cell) => {
+    const value = cell.trim();
+    return value !== "" && Number.isFinite(Number(value));
+  });
+  return !hasNumericCell;
+}
+
+/**
+ * First non-empty line carries the JSON metadata header. It may be prefixed with
+ * arbitrary text (e.g. `# metadata: `), so we parse from the first `{` onwards.
+ */
 export function parseCsv(text: string): ParseResult {
   const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
   if (lines.length === 0) {
@@ -75,10 +110,14 @@ export function parseCsv(text: string): ParseResult {
 
   let metaRaw: Record<string, unknown> = {};
   try {
-    const first = lines[0]!.trim().replace(/^#\s*/, "");
+    const firstLine = lines[0]!;
+    const braceIndex = firstLine.indexOf("{");
+    if (braceIndex === -1) throw new Error("no json object on metadata line");
+    const first = firstLine.slice(braceIndex).trim();
     const parsed: unknown = JSON.parse(first);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not object");
     metaRaw = parsed as Record<string, unknown>;
+
   } catch {
     return {
       candles: [],
@@ -99,18 +138,29 @@ export function parseCsv(text: string): ParseResult {
     }
   }
 
+  const sectionConvention =
+    metaRaw["section_marker_convention"] === undefined || metaRaw["section_marker_convention"] === null
+      ? undefined
+      : String(metaRaw["section_marker_convention"]).trim();
+
   const meta: Metadata = {
     data_age: String(metaRaw["data_age"]).trim(),
     spread_convention: String(metaRaw["spread_convention"]).trim(),
     atr_method: String(metaRaw["atr_method"]).trim(),
     similar_swing_selection_rule: String(metaRaw["similar_swing_selection_rule"]).trim(),
+    section_marker_convention: sectionConvention,
   };
+
+  const markers = sectionMarkers(sectionConvention);
 
   const header = splitCsvLine(lines[1] ?? "").map((h) => h.toLowerCase());
   const candles: Candle[] = [];
 
   for (let l = 2; l < lines.length; l++) {
     const cells = splitCsvLine(lines[l]!);
+    // Section/day dividers are not data — detected via section_marker_convention
+    // when present, with a marker/no-numeric-cells fallback otherwise.
+    if (isDividerLine(lines[l]!, cells, markers)) continue;
     const raw: Record<string, string> = {};
     header.forEach((key, idx) => {
       raw[key] = cells[idx] ?? "";
