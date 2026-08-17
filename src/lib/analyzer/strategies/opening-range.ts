@@ -33,12 +33,26 @@ export const openingRange: StrategyCheck = {
       if (!touched) continue;
       if (r.isReliable === undefined) return fail("missing field: is_reliable (retest candle)");
       if (!r.isReliable) return fail(`retest candle at +${k} has is_reliable = false`);
+      // Root cause of the wrong-side SL: the retest candle must close back on the
+      // breakout side of the boundary. Closing through it is a failed breakout,
+      // not a retest entry, and previously produced entry below/above its own SL.
+      const reclaimed = up ? r.close! > boundary : r.close! < boundary;
+      if (!reclaimed) {
+        return fail(
+          `retest candle at +${k} closed ${r.close} through the boundary ${boundary} (failed breakout, not a retest)`,
+        );
+      }
+      // Stop goes beyond the retest extreme, never inside the entry.
+      const sl = up ? Math.min(boundary, r.low!) : Math.max(boundary, r.high!);
+      if (up ? sl >= r.close! : sl <= r.close!) {
+        return fail("INVALID: SL on wrong side of entry");
+      }
       const measured = orHigh - orLow;
       return pass(
         `${c.session} opening range breakout ${up ? "above" : "below"} ${boundary} with retest`,
         up ? "long" : "short",
         r.close!,
-        boundary,
+        sl,
         up ? r.close! + measured : r.close! - measured,
       );
     }
