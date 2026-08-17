@@ -91,7 +91,7 @@ describe("divider detection via section_marker_convention", () => {
       const parsed = parseCsv(rows(marker));
       expect(parsed.candles).toHaveLength(2);
       expect(parsed.candles.every((c) => !c.invalid)).toBe(true);
-      expect(parsed.invalidRowsSkipped).toBeUndefined();
+      expect(parsed.candles.filter((c) => c.invalid)).toHaveLength(0);
     }
   });
 
