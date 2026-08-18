@@ -10,9 +10,11 @@ interface VerifierPanelProps {
   ohlcCsv: string;
   /** Called once the verdict is in, so the bundle can be zipped and downloaded. */
   onVerdict?: (result: VerifyResult) => void;
+  /** Streams verifier stage messages into the analysis console. */
+  onLog?: (message: string, tone?: "info" | "warn" | "error" | "success") => void;
 }
 
-export function VerifierPanel({ scoutData, ohlcCsv, onVerdict }: VerifierPanelProps) {
+export function VerifierPanel({ scoutData, ohlcCsv, onVerdict, onLog }: VerifierPanelProps) {
   const runVerifier = useServerFn(verifySetup);
   const [result, setResult] = useState<VerifyResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -20,6 +22,8 @@ export function VerifierPanel({ scoutData, ohlcCsv, onVerdict }: VerifierPanelPr
   const started = useRef(false);
   const onVerdictRef = useRef(onVerdict);
   onVerdictRef.current = onVerdict;
+  const onLogRef = useRef(onLog);
+  onLogRef.current = onLog;
 
   useEffect(() => {
     if (started.current || scoutData.trim() === "") return;
@@ -30,13 +34,23 @@ export function VerifierPanel({ scoutData, ohlcCsv, onVerdict }: VerifierPanelPr
       setBusy(true);
       setError(null);
       setResult(null);
+      onLogRef.current?.("Verifier: sending live setups + OHLC to the model…");
       try {
         const outcome = await runVerifier({ data: { scoutData, ohlcCsv } });
         if (cancelled) return;
         setResult(outcome);
+        onLogRef.current?.(
+          `Verifier: verdict received via ${outcome.provider} · ${outcome.model}`,
+          "success",
+        );
+        for (const warning of outcome.warnings) onLogRef.current?.(`Verifier: ${warning}`, "warn");
         onVerdictRef.current?.(outcome);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : String(err);
+          setError(message);
+          onLogRef.current?.(`Verifier failed: ${message}`, "error");
+        }
       } finally {
         if (!cancelled) setBusy(false);
       }
