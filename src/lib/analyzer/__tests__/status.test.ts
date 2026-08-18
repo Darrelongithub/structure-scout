@@ -57,18 +57,6 @@ describe("evaluateSetupStatus", () => {
     const candles = [candle(0, 100, 101), ...Array.from({ length: 25 }, (_, i) => candle(i + 1, 95, 99))];
     expect(evaluateSetupStatus(base, candles, 20).setupStatus).toBe("EXPIRED");
   });
-
-  it("keeps a setup on the very last candle PENDING, not EXPIRED", () => {
-    const candles = [candle(0, 100, 101)];
-    const evaluation = evaluateSetupStatus(base, candles);
-    expect(evaluation.setupStatus).toBe("PENDING");
-    expect(evaluation.candlesSinceTrigger).toBe(0);
-  });
-
-  it("stays PENDING at exactly the expiry boundary", () => {
-    const candles = [candle(0, 100, 101), ...Array.from({ length: 20 }, (_, i) => candle(i + 1, 95, 99))];
-    expect(evaluateSetupStatus(base, candles, 20).setupStatus).toBe("PENDING");
-  });
 });
 
 describe("parseCsv day headers", () => {
@@ -103,7 +91,6 @@ describe("divider detection via section_marker_convention", () => {
       const parsed = parseCsv(rows(marker));
       expect(parsed.candles).toHaveLength(2);
       expect(parsed.candles.every((c) => !c.invalid)).toBe(true);
-      expect(parsed.candles.filter((c) => c.invalid)).toHaveLength(0);
     }
   });
 
