@@ -1,30 +1,64 @@
 import { createServerFn } from "@tanstack/react-start";
 
-export const VERIFIER_SYSTEM_PROMPT = `You are the VERIFIER stage of a forex trading pipeline.
+export const VERIFIER_SYSTEM_PROMPT = `I'm sending this app's own analysis output: the SUMMARY block, the Live/Actionable PASS setups list
+(with setup_status), the Overlaps section, and the raw 30M OHLC with precomputed columns (is_reliable,
+atr_30m, similar_swing_retrace_pct, similar_swing_refs) and metadata (data_age, spread_convention,
+atr_method, similar_swing_selection_rule). Find the one trade worth taking from the PASS list — any
+strategy the data already validated. Prefer a limit order at an untouched level over forcing a
+market entry.
 
-You receive: (1) the Picker's chosen setup(s), (2) the Structure Scout SUMMARY block and setup lines, (3) raw candles / OHLC data, and (4) any chart notes provided.
+Gate: confirm all 4 metadata fields are present and at least one Live/Actionable setup exists. If
+either is missing, say so and stop — don't compute substitutes.
 
-Your job is to challenge the Picker, not to agree with it. Never invent prices; every claim must trace back to a row in the supplied data. If data needed for a check is missing, say exactly which field is missing.
+Rules:
+- Every Entry/SL/TP/RR is already computed and verified by this app — use them exactly as given,
+  never recompute or re-derive them from OHLC.
+- Entry/SL/TP are already spread-adjusted. Do not apply spread_convention yourself — it's already
+  been applied once, at the final step, by this app.
+- Trust setup_status as given: only consider setups marked PENDING or FILLED. Never pick RESOLVED
+  or EXPIRED.
+- Safety filter — exclude before considering: any setup with RR > 15, or where SL sits on the wrong
+  side of entry for its direction (SL >= entry for long, SL <= entry for short). These indicate
+  broken math and must never be picked, regardless of which strategy produced them.
+- If citing any candle beyond the setup's own trigger candle (e.g. supporting structure), cite only
+  is_reliable=true rows — trust the flag.
+- Use atr_30m and similar_swing_retrace_pct/similar_swing_refs directly, don't recompute. For limit
+  entries, check distance vs similar_swing_retrace_pct using cited similar_swing_refs; flag
+  atypically deep retracement with no move toward it, prefer the next setup.
+- Prioritize fill probability over max RR; avoid the deepest zone edge unless a full retrace is
+  likely.
+- State data_age, diffed vs today, in the output.
+- Every structural claim cites timestamp + OHLC.
+- Silently weigh >=2 setups from the list; state why the weaker one was rejected, citing the specific
+  failing value.
+- If SL sits exactly at a visible swing point, flag the stop-cluster risk rather than assuming it's
+  safe.
+- If nothing on the list clears RR > 1:2 with strong TP-before-SL odds, or the best one barely
+  qualifies, say so plainly instead of forcing a pick.
 
-Return your verdict in EXACTLY this structure, as plain text:
+Do ONE of the following:
+1. PICK the single best currently-live setup.
+2. JOIN two setups if they reinforce each other — same direction, overlapping zone, or one confirms
+   the other. State plainly why joining is stronger than either alone.
+3. SPOT a setup the ranking undersold — state explicitly what the ranking missed and why it matters.
 
-=== VERDICT SUMMARY ===
-1. Staleness Check — how old is the data vs the setup trigger, and is the setup still current?
-2. Join/Spot Validity — is this a valid join (already-moving) or spot (fresh) entry, or has price already left the zone?
-3. RR Reality — recompute RR from entry/SL/TP with spread applied; state whether the stated RR holds.
-4. Fill Feasibility — can the entry realistically fill from current price, and what would have to happen first?
-5. Visual Confirmation — what the candle/structure evidence supports or contradicts.
-6. Data Age — restate data_age and its effect on confidence.
-7. Final Call — one of TAKE / SKIP / WAIT, with a one-line reason.
-8. Adjusted Trade — only if the setup is salvageable: adjusted entry, SL, TP and RR. Otherwise write "none".`;
+Output: Path Taken (Pick/Join/Spot), Entry Type, Direction, Entry, SL, TP, RR (as given, already
+spread-adjusted)
+Trade Summary: Source Strategy(ies) / Entry Reason / SL Justification / TP Justification /
+Invalidation Window / Data Age / Confidence (H/M/L)`;
 
+// OpenRouter retired the `:free` DeepSeek slugs (404: "unavailable for free"),
+// so the live R1 slugs come first with free reasoning models as a safety net.
 const OPENROUTER_MODELS = [
-  "deepseek/deepseek-r1:free",
-  "deepseek/deepseek-r1-0528:free",
-  "deepseek/deepseek-chat-v3-0324:free",
+  "deepseek/deepseek-r1",
+  "deepseek/deepseek-r1-0528",
+  "deepseek/deepseek-chat-v3-0324",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "openai/gpt-oss-20b:free",
 ];
 
-const NVIDIA_MODELS = ["deepseek-ai/deepseek-r1-0528", "deepseek-ai/deepseek-r1"];
+// Only DeepSeek model NVIDIA NIM currently serves on this key.
+const NVIDIA_MODELS = ["deepseek-ai/deepseek-v4-flash-0731", "deepseek-ai/deepseek-r1"];
 
 export interface VerifyResult {
   verdict: string;
@@ -34,7 +68,9 @@ export interface VerifyResult {
 }
 
 interface ChatResponse {
-  choices?: { message?: { content?: string; reasoning?: string } }[];
+  choices?: {
+    message?: { content?: string; reasoning?: string; reasoning_content?: string };
+  }[];
   error?: { message?: string };
 }
 
@@ -45,6 +81,8 @@ async function callChat(
   messages: { role: string; content: string }[],
   extraHeaders: Record<string, string> = {},
 ): Promise<string> {
+  const started = Date.now();
+  // A stalled provider must fail over to the next model instead of hanging the page.
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -52,10 +90,12 @@ async function callChat(
       "Content-Type": "application/json",
       ...extraHeaders,
     },
-    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 2000 }),
+    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 3000 }),
+    signal: AbortSignal.timeout(120_000),
   });
 
   const text = await res.text();
+  console.log(`[verifier] ${model} -> ${res.status} in ${Date.now() - started}ms`);
   let payload: ChatResponse = {};
   try {
     payload = JSON.parse(text) as ChatResponse;
@@ -66,28 +106,45 @@ async function callChat(
     throw new Error(payload.error?.message ?? `${res.status} ${text.slice(0, 300)}`);
   }
   const choice = payload.choices?.[0]?.message;
-  const content = (choice?.content ?? "").trim() || (choice?.reasoning ?? "").trim();
+  const content =
+    (choice?.content ?? "").trim() ||
+    (choice?.reasoning ?? "").trim() ||
+    (choice?.reasoning_content ?? "").trim();
   if (!content) throw new Error("empty response from model");
   return content;
 }
 
+const OHLC_CHAR_LIMIT = 60_000;
+
+function trimCsv(csv: string): string {
+  if (csv.length <= OHLC_CHAR_LIMIT) return csv;
+  const lines = csv.split("\n");
+  const head = lines.slice(0, 2).join("\n");
+  const tail: string[] = [];
+  let size = head.length;
+  for (let i = lines.length - 1; i > 1; i--) {
+    const line = lines[i] as string;
+    if (size + line.length > OHLC_CHAR_LIMIT) break;
+    size += line.length;
+    tail.unshift(line);
+  }
+  return `${head}\n${tail.join("\n")}\n(note: older rows truncated to fit the context window)`;
+}
+
 export const verifySetup = createServerFn({ method: "POST" })
-  .inputValidator((input: { pickerOutput: string; scoutData: string; chartNotes?: string }) => {
-    if (!input || typeof input.pickerOutput !== "string" || input.pickerOutput.trim() === "") {
-      throw new Error("Picker output is required");
+  .inputValidator((input: { scoutData: string; ohlcCsv?: string }) => {
+    if (!input || typeof input.scoutData !== "string" || input.scoutData.trim() === "") {
+      throw new Error("Analyzer output is required");
     }
     return input;
   })
   .handler(async ({ data }): Promise<VerifyResult> => {
     const userContent = [
-      "--- PICKER OUTPUT ---",
-      data.pickerOutput.trim(),
+      "--- ANALYZER OUTPUT (SUMMARY + LIVE/ACTIONABLE PASS setups + Overlaps) ---",
+      data.scoutData.trim(),
       "",
-      "--- STRUCTURE SCOUT DATA (SUMMARY + setups + candles/OHLC) ---",
-      data.scoutData.trim() || "(none supplied)",
-      "",
-      "--- CHART NOTES ---",
-      (data.chartNotes ?? "").trim() || "(none supplied)",
+      "--- RAW 30M OHLC WITH PRECOMPUTED COLUMNS AND METADATA ---",
+      trimCsv((data.ohlcCsv ?? "").trim()) || "(none supplied)",
     ].join("\n");
 
     const messages = [
@@ -98,6 +155,9 @@ export const verifySetup = createServerFn({ method: "POST" })
     const warnings: string[] = [];
     const openRouterKey = process.env["OPENROUTER_API_KEY"];
     const nvidiaKey = process.env["NVIDIA_API_KEY"];
+    console.log(
+      `[verifier] start chars=${userContent.length} or=${Boolean(openRouterKey)} nv=${Boolean(nvidiaKey)}`,
+    );
 
     if (openRouterKey) {
       // Free DeepSeek R1 slugs, newest first — OpenRouter retires them periodically.
