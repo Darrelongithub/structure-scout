@@ -3,11 +3,12 @@ import { Link } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 
 import { VerifierPanel } from "@/components/verifier-panel";
+import { AnalysisConsole, type ConsoleLine } from "@/components/analysis-console";
 
 import { buildReport } from "@/lib/analyzer/export";
 import { downloadBundle, type BundleOutcome } from "@/lib/analyzer/bundle";
 
-import { runAnalysis } from "@/lib/analyzer/run";
+import { runAnalysisAsync } from "@/lib/analyzer/run";
 import type { Analysis, ResultRow } from "@/lib/analyzer/types";
 import { useAnalysisSnapshot } from "@/lib/analysis-store";
 import type { VerifyResult } from "@/lib/verifier.functions";
@@ -50,33 +51,76 @@ export default function AnalysisV2() {
   const [strategyFilter, setStrategyFilter] = useState("all");
   const [resultFilter, setResultFilter] = useState<"all" | "PASS" | "FAIL">("all");
   const [bundle, setBundle] = useState<BundleOutcome | null>(null);
+  const [percent, setPercent] = useState(0);
+  const [phase, setPhase] = useState("Waiting for a generated CSV.");
+  const [lines, setLines] = useState<ConsoleLine[]>([]);
   const csv = snapshot?.ohlcCsv ?? null;
   const csvName = snapshot?.csvName ?? (snapshot ? `${snapshot.symbol}.csv` : null);
   const bundledFor = useRef<string | null>(null);
+
+  const log = useCallback((message: string, tone?: ConsoleLine["tone"]) => {
+    const time = new Date().toISOString().slice(11, 19);
+    setLines((prev) => [...prev.slice(-199), { time, message, tone }]);
+  }, []);
 
   // The generated CSV is the only input — analyse it as soon as it's available.
   useEffect(() => {
     if (!csv) {
       setStatus("idle");
       setAnalysis(null);
+      setPercent(0);
+      setPhase("Waiting for a generated CSV.");
       return;
     }
+    let cancelled = false;
     setStatus("working");
     setError(null);
     setBundle(null);
     bundledFor.current = null;
-    const outcome = runAnalysis(csv);
-    if (!outcome.ok) {
-      setAnalysis(null);
-      setError(outcome.error);
-      setStatus("error");
-      return;
-    }
-    setAnalysis(outcome.analysis);
-    setStrategyFilter("all");
-    setResultFilter("all");
-    setStatus("ready");
-  }, [csv]);
+    setPercent(0);
+    setLines([]);
+    log("Analysis started");
+
+    void (async () => {
+      try {
+        const outcome = await runAnalysisAsync(csv, (event) => {
+          if (cancelled) return;
+          setPercent(event.percent);
+          setPhase(event.message);
+          log(event.message);
+        });
+        if (cancelled) return;
+        if (!outcome.ok) {
+          setAnalysis(null);
+          setError(outcome.error);
+          setStatus("error");
+          setPhase(outcome.error);
+          log(outcome.error, "error");
+          return;
+        }
+        setAnalysis(outcome.analysis);
+        setStrategyFilter("all");
+        setResultFilter("all");
+        setStatus("ready");
+        setPercent(100);
+        log(
+          `Analysis complete · ${outcome.analysis.passing.length} PASS · ${outcome.analysis.live.length} live`,
+          "success",
+        );
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setAnalysis(null);
+        setError(message);
+        setStatus("error");
+        log(`Analysis crashed: ${message}`, "error");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [csv, log]);
 
   const handleVerdict = useCallback(
     (result: VerifyResult) => {
@@ -84,11 +128,20 @@ export default function AnalysisV2() {
       const key = analysis.lastRowDatetime || "analysis";
       if (bundledFor.current === key) return;
       bundledFor.current = key;
+      log("Bundling reports + charts for download…");
       void downloadBundle(analysis, { csv, csvName, verdict: result.verdict }).then((outcome) => {
-        if (outcome) setBundle(outcome);
+        if (outcome) {
+          setBundle(outcome);
+          log(
+            outcome.autoDownloaded
+              ? `Downloaded ${outcome.fileName}`
+              : `Bundle ready — automatic download blocked, save ${outcome.fileName} manually`,
+            outcome.autoDownloaded ? "success" : "warn",
+          );
+        }
       });
     },
-    [analysis, csv, csvName],
+    [analysis, csv, csvName, log],
   );
 
   const rows: ResultRow[] = useMemo(() => {
