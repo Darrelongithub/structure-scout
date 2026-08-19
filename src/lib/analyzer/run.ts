@@ -1,3 +1,7 @@
+import { computeConfluence } from "./confluence";
+import { buildHtfModel, htfContextAt } from "./htf";
+import { sessionContextFor } from "./session-context";
+import { evaluateStaleness } from "./staleness";
 import { ema, sessionBlocks } from "./indicators";
 import { applySpreadAndRR, RR_FAIL_REASON, RR_THRESHOLD } from "./math";
 import { parseCsv, parseSpread } from "./parse";
@@ -96,7 +100,7 @@ export function* analysisSteps(text: string): Generator<ProgressEvent, RunOutcom
 
       if (outcome.result === "PASS") {
         // Step 4: spread + RR are applied only to PASS results.
-        const math = applySpreadAndRR(outcome, ctx.spread);
+        const math = applySpreadAndRR(outcome, ctx.spread, candle.atr30m);
         if (!math) {
           row.result = "FAIL";
           row.reason = "missing entry/SL/TP price from source rows";
@@ -163,6 +167,24 @@ export function* analysisSteps(text: string): Generator<ProgressEvent, RunOutcom
     row.setupStatus = evaluation.setupStatus;
     row.statusNote = evaluation.statusNote;
     row.candlesSinceTrigger = evaluation.candlesSinceTrigger;
+  }
+
+  yield {
+    percent: 94,
+    message: "Computing context fields (ATR, confluence, HTF trend, session, staleness)…",
+  };
+  // Context only: these never flip result or setupStatus, they add ranking signal.
+  const htfModel = buildHtfModel(candles);
+  for (const row of passing) {
+    const candle = byDatetime.get(row.datetime.trim()) ?? candles[row.index];
+    if (!candle) continue;
+    row.atr30m = candle.atr30m;
+    if (row.entry !== undefined) row.confluence = computeConfluence(ctx, candle, row.entry);
+    row.htf = htfContextAt(htfModel, row.index, row.side);
+    row.sessionContext = sessionContextFor(candles, ctx.blocks, candle);
+    const staleness = evaluateStaleness(row, candles);
+    row.stalenessFlag = staleness.flag;
+    row.stalenessReason = staleness.reason;
   }
 
   const statusRank: Record<string, number> = { PENDING: 0, FILLED: 1 };

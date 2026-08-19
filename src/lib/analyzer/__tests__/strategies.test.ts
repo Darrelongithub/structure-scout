@@ -62,7 +62,8 @@ describe("2 — Liquidity Sweep + Reclaim", () => {
     const result = outcome(liquiditySweep, base, 3);
     expect(result.result).toBe("PASS");
     expect(result.side).toBe("short");
-    expect(result.tp).toBe(99);
+    // TP targets the NEAREST opposing level below entry, not the most extreme.
+    expect(result.tp).toBe(101);
   });
 
   it("fails when the wick percentage is under 55%", () => {

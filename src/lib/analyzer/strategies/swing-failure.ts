@@ -1,4 +1,13 @@
-import { at, fail, pass, requireFields, requireSwings, valid } from "./util";
+import {
+  at,
+  fail,
+  nearestLevelAbove,
+  nearestLevelBelow,
+  pass,
+  requireFields,
+  requireSwings,
+  valid,
+} from "./util";
 import type { StrategyCheck } from "../types";
 
 export const swingFailure: StrategyCheck = {
@@ -23,8 +32,8 @@ export const swingFailure: StrategyCheck = {
         const wick = k === 0 ? c.upperWickPct! : breaker.upperWickPct;
         if (wick === undefined) return fail("missing field: upper_wick_pct (breaking candle)");
         if (wick < 50) return fail(`upper_wick_pct ${wick}% below 50% on failed break`);
-        const tp = Math.min(...swings.lows);
-        if (!(tp < c.close!)) return fail("no opposing swing low below the failure close");
+        const tp = nearestLevelBelow(swings, c.close!);
+        if (tp === undefined) return fail("no opposing swing low below the failure close");
         return pass(`failed break of swing high ${brokenHigh}, closed back within ${k} candle(s)`, "short", c.close!, breaker.high!, tp);
       }
       const brokenLow = swings.lows.filter((l) => breaker.low! < l && c.close! > l).sort((a, b) => a - b)[0];
@@ -32,8 +41,8 @@ export const swingFailure: StrategyCheck = {
         const wick = k === 0 ? c.lowerWickPct! : breaker.lowerWickPct;
         if (wick === undefined) return fail("missing field: lower_wick_pct (breaking candle)");
         if (wick < 50) return fail(`lower_wick_pct ${wick}% below 50% on failed break`);
-        const tp = Math.max(...swings.highs);
-        if (!(tp > c.close!)) return fail("no opposing swing high above the failure close");
+        const tp = nearestLevelAbove(swings, c.close!);
+        if (tp === undefined) return fail("no opposing swing high above the failure close");
         return pass(`failed break of swing low ${brokenLow}, closed back within ${k} candle(s)`, "long", c.close!, breaker.low!, tp);
       }
     }
