@@ -1,4 +1,12 @@
-import { at, fail, pass, requireSwings, structureAbove, structureBelow, valid } from "./util";
+import {
+  at,
+  fail,
+  nearestLevelAbove,
+  nearestLevelBelow,
+  pass,
+  requireSwings,
+  valid,
+} from "./util";
 import type { StrategyCheck } from "../types";
 
 export const fvgFill: StrategyCheck = {
@@ -34,7 +42,9 @@ export const fvgFill: StrategyCheck = {
       const entry = gapUp ? gapTop : gapBottom;
       const sl = gapUp ? gapBottom : gapTop;
       const tp =
-        (gapUp ? structureAbove(resolved.swings, entry) : structureBelow(resolved.swings, entry)) ??
+        (gapUp
+          ? nearestLevelAbove(resolved.swings, entry)
+          : nearestLevelBelow(resolved.swings, entry)) ??
         (gapUp ? entry + (gapTop - gapBottom) * 3 : entry - (gapTop - gapBottom) * 3);
       return pass(
         `filled ${gapUp ? "bullish" : "bearish"} fair value gap from ${d.datetime}`,

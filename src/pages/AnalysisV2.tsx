@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { VerifierPanel } from "@/components/verifier-panel";
 import { AnalysisConsole, type ConsoleLine } from "@/components/analysis-console";
+import { BacktestPanel } from "@/components/backtest-panel";
 
 import { buildReport } from "@/lib/analyzer/export";
 import { downloadBundle, type BundleOutcome } from "@/lib/analyzer/bundle";
@@ -11,7 +12,7 @@ import { downloadBundle, type BundleOutcome } from "@/lib/analyzer/bundle";
 import { runAnalysisAsync } from "@/lib/analyzer/run";
 import type { Analysis, ResultRow } from "@/lib/analyzer/types";
 import { useAnalysisSnapshot } from "@/lib/analysis-store";
-import type { VerifyResult } from "@/lib/verifier.functions";
+import type { VerifyResult } from "@/lib/verifier.prompt";
 
 type Status = "idle" | "working" | "ready" | "error";
 
@@ -41,6 +42,43 @@ function StatusDot({ status }: { status: Status }) {
 
 function price(value: number | undefined) {
   return value === undefined ? "—" : Number(value.toFixed(5)).toString();
+}
+
+function stalenessTone(flag: string | undefined) {
+  return flag === "Stale"
+    ? "bg-destructive/15 text-destructive"
+    : flag === "Aging"
+      ? "bg-warning/15 text-warning"
+      : "bg-success/15 text-success";
+}
+
+/** Context-only signals: ranking/reasoning info, never pass/fail gates. */
+function SetupContext({ row }: { row: ResultRow }) {
+  return (
+    <div className="flex flex-col gap-0.5 text-[11px] text-muted-foreground">
+      <span>
+        ATR(30m) {price(row.atr30m)} · Confluence {row.confluence?.score ?? "—"}
+        {row.confluence && row.confluence.matched.length > 0
+          ? ` (${row.confluence.matched.join(", ")})`
+          : ""}
+      </span>
+      <span>
+        HTF {row.htf ? row.htf.summary : "—"}
+        {row.htf ? ` · ${row.htf.alignedCount}/3 aligned` : ""}
+      </span>
+      <span>
+        Asian range {row.sessionContext?.asianRangeText ?? "—"} · London{" "}
+        {row.sessionContext?.londonOpenDirection ?? "—"} · NY{" "}
+        {row.sessionContext?.nyOpenDirection ?? "—"}
+      </span>
+      <span>
+        <span className={`rounded px-1.5 py-0.5 ${stalenessTone(row.stalenessFlag)}`}>
+          {row.stalenessFlag ?? "—"}
+        </span>{" "}
+        {row.stalenessReason ?? ""}
+      </span>
+    </div>
+  );
 }
 
 export default function AnalysisV2() {
@@ -122,14 +160,15 @@ export default function AnalysisV2() {
     };
   }, [csv, log]);
 
-  const handleVerdict = useCallback(
-    (result: VerifyResult) => {
+  const bundleWith = useCallback(
+    (verdict: string) => {
       if (!analysis) return;
       const key = analysis.lastRowDatetime || "analysis";
       if (bundledFor.current === key) return;
       bundledFor.current = key;
       log("Bundling reports + charts for download…");
-      void downloadBundle(analysis, { csv, csvName, verdict: result.verdict }).then((outcome) => {
+      // The source CSV is intentionally not bundled — reports only.
+      void downloadBundle(analysis, { csv: null, csvName: null, verdict }).then((outcome) => {
         if (outcome) {
           setBundle(outcome);
           log(
@@ -141,8 +180,22 @@ export default function AnalysisV2() {
         }
       });
     },
-    [analysis, csv, csvName, log],
+    [analysis, log],
   );
+
+  const handleVerdict = useCallback(
+    (result: VerifyResult) => bundleWith(result.verdict),
+    [bundleWith],
+  );
+
+  const handleNoSetups = useCallback(
+    () =>
+      bundleWith(
+        "No live/actionable PASS setups as of the last candle — nothing was sent to the picker.",
+      ),
+    [bundleWith],
+  );
+
 
   const rows: ResultRow[] = useMemo(() => {
     if (!analysis) return [];
@@ -156,60 +209,56 @@ export default function AnalysisV2() {
   const visible = rows.slice(0, 500);
 
   return (
-    <main className="min-h-screen bg-background px-4 py-10 sm:px-8">
-      <div className="mx-auto flex max-w-6xl flex-col gap-8">
-        <header className="flex flex-col gap-3">
-          <Link
-            to="/analysis"
-            className="flex w-fit items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-[11px] font-bold text-primary transition-colors hover:bg-primary/20"
-          >
-            <ArrowLeft size={12} /> Analyser versions
-          </Link>
-          <p className="num text-xs uppercase tracking-[0.35em] text-primary">
-            Analyser V2 · Structure Scout
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            Trading strategy analyzer
-          </h1>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Every candle is checked against 13 structure strategies. Nothing is estimated — each
-            result traces back to a real row in the generated CSV.
-          </p>
+    <main className="min-h-screen bg-background px-4 py-8 sm:px-8">
+      <div className="mx-auto flex max-w-6xl flex-col gap-5">
+        <header className="flex flex-wrap items-end justify-between gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Link
+              to="/analysis"
+              className="flex w-fit items-center gap-1.5 text-[11px] font-semibold text-primary transition-opacity hover:opacity-80"
+            >
+              <ArrowLeft size={12} /> Analyser versions
+            </Link>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+              Trading strategy analyzer
+            </h1>
+            <p className="num text-[11px] uppercase tracking-[0.3em] text-muted-foreground">
+              V2 · Structure Scout · 13 strategies
+            </p>
+          </div>
+          <StatusDot status={status} />
         </header>
 
-        <section className="panel flex flex-col gap-4 p-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex flex-col gap-1">
-              <h2 className="text-base font-medium text-foreground">
-                Generated CSV{csvName ? ` · ${csvName}` : ""}
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                {snapshot
-                  ? `${snapshot.symbol} · ${snapshot.range || "range unspecified"} — analysed automatically, verifier runs next, then the bundle downloads.`
-                  : "No CSV yet — generate one on the fetcher page and it will be analysed here automatically."}
-              </p>
-            </div>
-            <StatusDot status={status} />
+        <section className="panel flex flex-col gap-3 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="num text-xs text-foreground">
+              {csvName ? csvName : "No CSV yet"}
+              {snapshot ? (
+                <span className="text-muted-foreground">
+                  {" "}
+                  · {snapshot.symbol} · {snapshot.range || "range unspecified"}
+                </span>
+              ) : null}
+            </p>
+            {!csv ? (
+              <Link
+                to="/"
+                className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                Go to the generator
+              </Link>
+            ) : null}
           </div>
 
-          {!csv ? (
-            <Link
-              to="/"
-              className="w-fit rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              Go to the generator
-            </Link>
-          ) : null}
-
           {bundle && !bundle.autoDownloaded ? (
-            <div className="flex flex-col gap-2 rounded-md border border-warning/50 bg-warning/10 px-3 py-3 text-sm text-foreground">
-              <p>The preview window blocks automatic downloads — save the bundle manually.</p>
+            <div className="flex flex-wrap items-center gap-3 rounded-md border border-warning/50 bg-warning/10 px-3 py-2 text-xs text-foreground">
+              <span>Automatic download blocked — save the bundle manually.</span>
               <a
                 href={bundle.url}
                 download={bundle.fileName}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="num w-fit rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                className="num rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
               >
                 Save {bundle.fileName}
               </a>
@@ -221,11 +270,29 @@ export default function AnalysisV2() {
           ) : null}
 
           {error ? (
-            <p className="num rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <p className="num rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {error}
             </p>
           ) : null}
         </section>
+
+        <AnalysisConsole
+          percent={percent}
+          phase={phase}
+          lines={lines}
+          running={status === "working"}
+        />
+
+        <BacktestPanel
+          csv={csv}
+          symbol={snapshot?.symbol ?? "dataset"}
+          lastRowDatetime={analysis?.lastRowDatetime}
+          onLog={log}
+        />
+
+
+
+
 
 
         {analysis ? (
@@ -259,9 +326,11 @@ export default function AnalysisV2() {
                 ))}
               </div>
 
-              <div className="flex flex-col gap-3">
-                <h3 className="text-sm font-medium text-foreground">Per strategy</h3>
-                <div className="flex flex-col gap-2">
+              <details className="rounded-md border border-border bg-secondary/30 px-4 py-3">
+                <summary className="cursor-pointer text-sm font-medium text-foreground">
+                  Per strategy ({analysis.perStrategy.length})
+                </summary>
+                <div className="mt-3 flex flex-col gap-2">
                   {analysis.perStrategy.map((strategy) => (
                     <details
                       key={strategy.strategyId}
@@ -293,7 +362,8 @@ export default function AnalysisV2() {
                     </details>
                   ))}
                 </div>
-              </div>
+              </details>
+
 
               <div className="flex flex-col gap-3">
                 <h3 className="text-sm font-medium text-foreground">
@@ -314,59 +384,66 @@ export default function AnalysisV2() {
                     {analysis.live.map((row, i) => (
                       <li
                         key={`${row.strategyId}-${row.index}`}
-                        className="num flex flex-wrap items-center justify-between gap-2 rounded-md bg-secondary/60 px-4 py-2 text-xs text-foreground"
+                        className="num flex flex-col gap-1 rounded-md bg-secondary/60 px-4 py-2 text-xs text-foreground"
                       >
-                        <span>
-                          {i + 1}.{" "}
-                          <span
-                            className={
-                              row.setupStatus === "FILLED"
-                                ? "rounded bg-warning/15 px-2 py-0.5 text-warning"
-                                : "rounded bg-success/15 px-2 py-0.5 text-success"
-                            }
-                          >
-                            {row.setupStatus}
-                          </span>{" "}
-                          {row.strategy} @ {row.datetime}
-                        </span>
-                        <span className="text-muted-foreground">
-                          entry {price(row.entry)} · SL {price(row.sl)} · TP {price(row.tp)} ·{" "}
-                          <span className="text-success">RR {row.rr?.toFixed(2)}</span>
-                        </span>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span>
+                            {i + 1}.{" "}
+                            <span
+                              className={
+                                row.setupStatus === "FILLED"
+                                  ? "rounded bg-warning/15 px-2 py-0.5 text-warning"
+                                  : "rounded bg-success/15 px-2 py-0.5 text-success"
+                              }
+                            >
+                              {row.setupStatus}
+                            </span>{" "}
+                            {row.strategy} @ {row.datetime}
+                          </span>
+                          <span className="text-muted-foreground">
+                            entry {price(row.entry)} · SL {price(row.sl)} · TP {price(row.tp)} ·{" "}
+                            <span className="text-success">RR {row.rr?.toFixed(2)}</span>
+                          </span>
+                        </div>
+                        <SetupContext row={row} />
                       </li>
                     ))}
                   </ol>
                 )}
               </div>
 
-              <div className="flex flex-col gap-3">
-                <h3 className="text-sm font-medium text-foreground">
+              <details className="flex flex-col gap-3 rounded-md border border-border bg-secondary/30 px-4 py-3">
+                <summary className="cursor-pointer text-sm font-medium text-foreground">
                   Historical record ({analysis.historical.length}) — resolved or expired
-                </h3>
-                <p className="text-xs text-muted-foreground">
+                </summary>
+                <p className="mt-2 text-xs text-muted-foreground">
                   Valid setups that are no longer tradeable. Kept for win-rate backtesting, not
                   counted as failures.
                 </p>
                 {analysis.historical.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">none</p>
+                  <p className="mt-2 text-xs text-muted-foreground">none</p>
                 ) : (
-                  <ol className="flex flex-col gap-2">
+                  <ol className="mt-3 flex flex-col gap-2">
                     {analysis.historical.slice(0, 50).map((row, i) => (
                       <li
                         key={`${row.strategyId}-${row.index}`}
-                        className="num flex flex-wrap items-center justify-between gap-2 rounded-md bg-secondary/40 px-4 py-2 text-xs text-muted-foreground"
+                        className="num flex flex-col gap-1 rounded-md bg-secondary/40 px-4 py-2 text-xs text-muted-foreground"
                       >
-                        <span>
-                          {i + 1}. [{row.setupStatus}] {row.strategy} @ {row.datetime}
-                        </span>
-                        <span>
-                          RR {row.rr?.toFixed(2)} · {row.statusNote}
-                        </span>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span>
+                            {i + 1}. [{row.setupStatus}] {row.strategy} @ {row.datetime}
+                          </span>
+                          <span>
+                            RR {row.rr?.toFixed(2)} · {row.statusNote}
+                          </span>
+                        </div>
+                        <SetupContext row={row} />
                       </li>
                     ))}
                   </ol>
                 )}
-              </div>
+              </details>
+
 
               {analysis.overlaps.length > 0 ? (
                 <div className="flex flex-col gap-2">
@@ -388,8 +465,12 @@ export default function AnalysisV2() {
               key={analysis.lastRowDatetime}
               scoutData={buildReport(analysis, "LIVE")}
               ohlcCsv={csv ?? ""}
+              hasLiveSetups={analysis.live.length > 0}
               onVerdict={handleVerdict}
+              onNoSetups={handleNoSetups}
+              onLog={log}
             />
+
 
 
             <section className="panel flex flex-col gap-4 p-6">
@@ -429,16 +510,32 @@ export default function AnalysisV2() {
               </p>
 
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[880px] border-collapse text-left text-xs">
+                <table className="w-full min-w-[1400px] border-collapse text-left text-xs">
                   <thead>
                     <tr className="text-muted-foreground">
-                      {["Datetime", "Strategy", "Result", "Trend", "Entry", "SL", "TP", "RR", "Reason"].map(
-                        (head) => (
-                          <th key={head} className="border-b border-border px-3 py-2 font-medium">
-                            {head}
-                          </th>
-                        ),
-                      )}
+                      {[
+                        "Datetime",
+                        "Strategy",
+                        "Result",
+                        "Trend",
+                        "Entry",
+                        "SL",
+                        "TP",
+                        "RR",
+                        "ATR(30m)",
+                        "Confluence",
+                        "H1/H4/D1",
+                        "HTF align",
+                        "Asian range",
+                        "London open",
+                        "NY open",
+                        "Staleness",
+                        "Reason",
+                      ].map((head) => (
+                        <th key={head} className="border-b border-border px-3 py-2 font-medium">
+                          {head}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
@@ -463,6 +560,50 @@ export default function AnalysisV2() {
                         <td className="num border-b border-border/60 px-3 py-2">{price(row.tp)}</td>
                         <td className="num border-b border-border/60 px-3 py-2">
                           {row.rr === undefined ? "—" : row.rr.toFixed(2)}
+                        </td>
+                        <td className="num border-b border-border/60 px-3 py-2">
+                          {price(row.atr30m)}
+                        </td>
+                        <td className="border-b border-border/60 px-3 py-2">
+                          {row.confluence ? (
+                            <span title={row.confluence.detail}>
+                              {row.confluence.score}
+                              {row.confluence.matched.length > 0
+                                ? ` (${row.confluence.matched.join(", ")})`
+                                : ""}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="border-b border-border/60 px-3 py-2">
+                          {row.htf ? `${row.htf.h1}/${row.htf.h4}/${row.htf.d1}` : "—"}
+                        </td>
+                        <td className="border-b border-border/60 px-3 py-2">
+                          {row.htf
+                            ? `${row.htf.h1Alignment}/${row.htf.h4Alignment}/${row.htf.d1Alignment}`
+                            : "—"}
+                        </td>
+                        <td className="num border-b border-border/60 px-3 py-2">
+                          {row.sessionContext?.asianRangeText ?? "—"}
+                        </td>
+                        <td className="border-b border-border/60 px-3 py-2">
+                          {row.sessionContext?.londonOpenDirection ?? "—"}
+                        </td>
+                        <td className="border-b border-border/60 px-3 py-2">
+                          {row.sessionContext?.nyOpenDirection ?? "—"}
+                        </td>
+                        <td className="border-b border-border/60 px-3 py-2">
+                          {row.stalenessFlag ? (
+                            <span
+                              className={`rounded px-1.5 py-0.5 ${stalenessTone(row.stalenessFlag)}`}
+                              title={row.stalenessReason ?? ""}
+                            >
+                              {row.stalenessFlag}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                         <td className="border-b border-border/60 px-3 py-2 text-muted-foreground">
                           {row.reason}

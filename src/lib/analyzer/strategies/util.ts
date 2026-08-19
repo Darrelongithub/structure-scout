@@ -102,14 +102,43 @@ export function nearestLevel(
   return best;
 }
 
-/** Highest swing high strictly above `price`, taken from a real row. */
+/** Nearest swing high strictly above `price`, taken from a real row. */
 export function structureAbove(swings: SwingSet, price: number): number | undefined {
   const above = swings.highs.filter((h) => h > price).sort((a, b) => a - b);
   return above[0];
 }
 
+/** Nearest swing low strictly below `price`, taken from a real row. */
 export function structureBelow(swings: SwingSet, price: number): number | undefined {
   const below = swings.lows.filter((l) => l < price).sort((a, b) => b - a);
+  return below[0];
+}
+
+/**
+ * Nearest structural level (swing high OR low) strictly above `price`.
+ * TP must target the NEAREST opposing level after entry, never the most
+ * extreme one found anywhere in the dataset.
+ */
+export function nearestLevelAbove(
+  swings: SwingSet,
+  price: number,
+  extra: number[] = [],
+): number | undefined {
+  const above = [...swings.highs, ...swings.lows, ...extra]
+    .filter((v) => Number.isFinite(v) && v > price)
+    .sort((a, b) => a - b);
+  return above[0];
+}
+
+/** Nearest structural level (swing high OR low) strictly below `price`. */
+export function nearestLevelBelow(
+  swings: SwingSet,
+  price: number,
+  extra: number[] = [],
+): number | undefined {
+  const below = [...swings.highs, ...swings.lows, ...extra]
+    .filter((v) => Number.isFinite(v) && v < price)
+    .sort((a, b) => b - a);
   return below[0];
 }
 

@@ -1,5 +1,6 @@
 import { blockContaining } from "../indicators";
-import { at, fail, pass, requireFields, valid } from "./util";
+import { resolveSwings } from "../structure";
+import { at, fail, nearestLevelAbove, nearestLevelBelow, pass, requireFields, valid } from "./util";
 import type { StrategyCheck } from "../types";
 
 export const asianLondon: StrategyCheck = {
@@ -36,21 +37,29 @@ export const asianLondon: StrategyCheck = {
       const r = at(ctx, k);
       if (!valid(r)) continue;
       if (sweptHigh && r.close! < priorHigh) {
+        // TP = nearest opposing level below entry (asian low or nearer swing),
+        // never the most extreme boundary found in the dataset.
+        const swings = resolveSwings(r, ctx.byDatetime);
+        const tp = nearestLevelBelow(swings, r.close!, [priorLow]);
+        if (tp === undefined) return fail("no opposing level below the london reclaim close");
         return pass(
           `asian sweep above ${priorHigh} reclaimed in london at ${r.datetime}`,
           "short",
           r.close!,
           c.high!,
-          priorLow,
+          tp,
         );
       }
       if (sweptLow && r.close! > priorLow) {
+        const swings = resolveSwings(r, ctx.byDatetime);
+        const tp = nearestLevelAbove(swings, r.close!, [priorHigh]);
+        if (tp === undefined) return fail("no opposing level above the london reclaim close");
         return pass(
           `asian sweep below ${priorLow} reclaimed in london at ${r.datetime}`,
           "long",
           r.close!,
           c.low!,
-          priorHigh,
+          tp,
         );
       }
     }
