@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { VerifierPanel } from "@/components/verifier-panel";
 import { AnalysisConsole, type ConsoleLine } from "@/components/analysis-console";
+import { BacktestPanel } from "@/components/backtest-panel";
 
 import { buildReport } from "@/lib/analyzer/export";
 import { downloadBundle, type BundleOutcome } from "@/lib/analyzer/bundle";
@@ -166,7 +167,8 @@ export default function AnalysisV2() {
       if (bundledFor.current === key) return;
       bundledFor.current = key;
       log("Bundling reports + charts for download…");
-      void downloadBundle(analysis, { csv, csvName, verdict }).then((outcome) => {
+      // The source CSV is intentionally not bundled — reports only.
+      void downloadBundle(analysis, { csv: null, csvName: null, verdict }).then((outcome) => {
         if (outcome) {
           setBundle(outcome);
           log(
@@ -178,7 +180,7 @@ export default function AnalysisV2() {
         }
       });
     },
-    [analysis, csv, csvName, log],
+    [analysis, log],
   );
 
   const handleVerdict = useCallback(
