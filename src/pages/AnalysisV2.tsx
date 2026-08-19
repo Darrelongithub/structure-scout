@@ -283,6 +283,13 @@ export default function AnalysisV2() {
           running={status === "working"}
         />
 
+        <BacktestPanel
+          csv={csv}
+          symbol={snapshot?.symbol ?? "dataset"}
+          lastRowDatetime={analysis?.lastRowDatetime}
+          onLog={log}
+        />
+
 
 
 
