@@ -5,8 +5,8 @@ import {
   pass,
   requireFields,
   requireSwings,
-  nearestLevelAbove,
-  nearestLevelBelow,
+  structureAbove,
+  structureBelow,
   valid,
 } from "./util";
 import type { StrategyCheck } from "../types";
@@ -59,7 +59,7 @@ export const bosRetest: StrategyCheck = {
       const entry = bullish ? r.high! : r.low!;
       const sl = bullish ? r.low! : r.high!;
       const tp =
-        (bullish ? nearestLevelAbove(swings, entry) : nearestLevelBelow(swings, entry)) ??
+        (bullish ? structureAbove(swings, entry) : structureBelow(swings, entry)) ??
         (bullish ? entry + impulse : entry - impulse);
       return pass(
         `broke swing ${level} with reliable retest at +${k}`,

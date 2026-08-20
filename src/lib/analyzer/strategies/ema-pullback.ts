@@ -1,12 +1,4 @@
-import {
-  fail,
-  nearestLevelAbove,
-  nearestLevelBelow,
-  pass,
-  requireFields,
-  requireSwings,
-  valid,
-} from "./util";
+import { fail, pass, requireFields, requireSwings, structureAbove, structureBelow, valid } from "./util";
 import type { StrategyCheck } from "../types";
 
 export const emaPullback: StrategyCheck = {
@@ -34,9 +26,7 @@ export const emaPullback: StrategyCheck = {
     if ("outcome" in resolved) return resolved.outcome;
     const entry = c.close!;
     const sl = bullish ? c.low! : c.high!;
-    const tp = bullish
-      ? nearestLevelAbove(resolved.swings, entry)
-      : nearestLevelBelow(resolved.swings, entry);
+    const tp = bullish ? structureAbove(resolved.swings, entry) : structureBelow(resolved.swings, entry);
     if (tp === undefined) return fail("no next structure level available in swing references");
     return pass(`pullback to EMA-50 (${ema50.toFixed(5)}) in ${c.trend} trend`, bullish ? "long" : "short", entry, sl, tp);
   },

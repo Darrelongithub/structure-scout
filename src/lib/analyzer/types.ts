@@ -66,6 +66,23 @@ export interface AnalysisContext {
   ema200: (number | undefined)[];
   blocks: import("./indicators").SessionBlock[];
   spread: number;
+  /** ATR(14) per bar — every threshold in the specs is ATR-relative. */
+  atr: (number | undefined)[];
+  /** Fractal pivot highs/lows with no-lookahead confirmation indexes. */
+  pivotHighs: import("./pivots").Pivot[];
+  pivotLows: import("./pivots").Pivot[];
+  /** Daily (EAT) aggregates used for pivot levels. */
+  daily: import("./daily").DayAggregate[];
+  /** Asian-session range per EAT day. */
+  asian: Map<string, import("./daily").RangeWindow>;
+  /** Opening range per `${day}|${session}`. */
+  openingRanges: Map<string, import("./daily").OpeningRange>;
+  /**
+   * Levels already used up by a strategy (swept swing, mitigated order block,
+   * filled FVG...). Keyed `${strategyId}` -> set of level keys, so the same
+   * level never re-triggers the same pattern.
+   */
+  consumed: Map<string, Set<string>>;
 }
 
 export interface StrategyCheck {
@@ -92,15 +109,6 @@ export interface ResultRow {
   setupStatus?: SetupStatus | undefined;
   statusNote?: string | undefined;
   candlesSinceTrigger?: number | undefined;
-  // --- Computed context fields (ranking/reasoning only, never pass/fail gates) ---
-  /** ATR(30m) at the setup candle, surfaced explicitly on PASS rows. */
-  atr30m?: number | undefined;
-  confluence?: import("./confluence").ConfluenceContext | undefined;
-  htf?: import("./htf").HtfTrendContext | undefined;
-  sessionContext?: import("./session-context").SessionPatternContext | undefined;
-  /** Fresh / Aging / Stale — independent of setupStatus. */
-  stalenessFlag?: import("./staleness").StalenessFlag | undefined;
-  stalenessReason?: string | undefined;
 }
 
 export interface OverlapEntry {
