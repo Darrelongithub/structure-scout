@@ -182,3 +182,93 @@ export function structureBelow(swings: SwingSet, price: number): number | undefi
 export function wickPct(candle: Candle, kind: "upper" | "lower"): number | undefined {
   return kind === "upper" ? candle.upperWickPct : candle.lowerWickPct;
 }
+
+/* ------------------------------------------------------------------ *
+ * Consumed / mitigated level tracking
+ * ------------------------------------------------------------------ */
+
+/**
+ * Bars are analysed oldest -> newest, so a strategy can mark a level as used up
+ * (swept swing, mitigated order block, filled FVG) and never re-trigger on it.
+ */
+export function isConsumed(ctx: AnalysisContext, strategyId: string, key: string): boolean {
+  return ctx.consumed.get(strategyId)?.has(key) ?? false;
+}
+
+export function consume(ctx: AnalysisContext, strategyId: string, key: string): void {
+  const set = ctx.consumed.get(strategyId) ?? new Set<string>();
+  set.add(key);
+  ctx.consumed.set(strategyId, set);
+}
+
+export function levelKey(prefix: string, value: number): string {
+  return `${prefix}:${value.toFixed(6)}`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Shared candle-shape detectors (OHLC only)
+ * ------------------------------------------------------------------ */
+
+export type PinDirection = "bullish" | "bearish";
+
+/**
+ * Pin bar geometry: rejecting wick > 2x body and the opposite wick small.
+ * The opposite-wick cap has a range-relative floor so a doji body cannot make
+ * the test mathematically impossible.
+ */
+export function pinBarShape(c: Candle): PinDirection | undefined {
+  const { body, upper, lower, range } = geometry(c);
+  if (range <= 0) return undefined;
+  const cap = Math.max(0.5 * body, 0.15 * range);
+  if (lower > 2 * body && lower >= 0.5 * range && upper <= cap) return "bullish";
+  if (upper > 2 * body && upper >= 0.5 * range && lower <= cap) return "bearish";
+  return undefined;
+}
+
+/** Engulfing geometry across bar i-1 -> i (bodies only, no wick tolerance). */
+export function engulfingShape(prev: Candle, c: Candle): PinDirection | undefined {
+  const prevTop = Math.max(prev.open!, prev.close!);
+  const prevBottom = Math.min(prev.open!, prev.close!);
+  const top = Math.max(c.open!, c.close!);
+  const bottom = Math.min(c.open!, c.close!);
+  const engulfs = top >= prevTop && bottom <= prevBottom;
+  if (!engulfs) return undefined;
+  const prevBody = prevTop - prevBottom;
+  const body = top - bottom;
+  if (body <= prevBody) return undefined;
+  if (c.close! > c.open! && prev.close! < prev.open!) return "bullish";
+  if (c.close! < c.open! && prev.close! > prev.open!) return "bearish";
+  return undefined;
+}
+
+/** True when any bar in (from, to] closed beyond `level` in the given direction. */
+export function closedBeyond(
+  ctx: AnalysisContext,
+  from: number,
+  to: number,
+  level: number,
+  direction: "above" | "below",
+): boolean {
+  for (let k = from + 1; k <= to; k++) {
+    const bar = at(ctx, k);
+    if (!valid(bar)) continue;
+    if (direction === "above" ? bar.close! > level : bar.close! < level) return true;
+  }
+  return false;
+}
+
+/** True when any bar in (from, to] traded through `level` with its wick. */
+export function tradedThrough(
+  ctx: AnalysisContext,
+  from: number,
+  to: number,
+  level: number,
+  direction: "above" | "below",
+): boolean {
+  for (let k = from + 1; k <= to; k++) {
+    const bar = at(ctx, k);
+    if (!valid(bar)) continue;
+    if (direction === "above" ? bar.high! >= level : bar.low! <= level) return true;
+  }
+  return false;
+}
