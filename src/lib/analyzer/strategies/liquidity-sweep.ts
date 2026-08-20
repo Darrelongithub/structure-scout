@@ -1,12 +1,4 @@
-import {
-  fail,
-  nearestLevelAbove,
-  nearestLevelBelow,
-  pass,
-  requireFields,
-  requireSwings,
-  valid,
-} from "./util";
+import { fail, pass, requireFields, requireSwings, valid } from "./util";
 import type { StrategyCheck } from "../types";
 
 export const liquiditySweep: StrategyCheck = {
@@ -31,16 +23,16 @@ export const liquiditySweep: StrategyCheck = {
     const sweptHigh = swings.highs.filter((h) => c.high! > h && c.close! < h).sort((a, b) => b - a)[0];
     if (sweptHigh !== undefined) {
       if (c.upperWickPct! < 55) return fail(`upper_wick_pct ${c.upperWickPct}% below 55%`);
-      const tp = nearestLevelBelow(swings, c.close!);
-      if (tp === undefined) return fail("no opposing swing low below reclaim close");
+      const tp = Math.min(...swings.lows);
+      if (!(tp < c.close!)) return fail("no opposing swing low below reclaim close");
       return pass(`swept swing high ${sweptHigh} and reclaimed below it`, "short", c.close!, c.high!, tp);
     }
 
     const sweptLow = swings.lows.filter((l) => c.low! < l && c.close! > l).sort((a, b) => a - b)[0];
     if (sweptLow !== undefined) {
       if (c.lowerWickPct! < 55) return fail(`lower_wick_pct ${c.lowerWickPct}% below 55%`);
-      const tp = nearestLevelAbove(swings, c.close!);
-      if (tp === undefined) return fail("no opposing swing high above reclaim close");
+      const tp = Math.max(...swings.highs);
+      if (!(tp > c.close!)) return fail("no opposing swing high above reclaim close");
       return pass(`swept swing low ${sweptLow} and reclaimed above it`, "long", c.close!, c.low!, tp);
     }
 

@@ -1,4 +1,5 @@
 import { resolveSwings, type SwingSet } from "../structure";
+import { confirmedBefore, nearestAbove, nearestBelow, type Pivot } from "../pivots";
 import type { AnalysisContext, Candle, Outcome } from "../types";
 
 export const FIELD_LABELS: Record<string, string> = {
@@ -79,6 +80,71 @@ export function at(ctx: AnalysisContext, index: number): Candle | undefined {
   return ctx.candles[index];
 }
 
+/** ATR(14) at bar i — every threshold in the specs is ATR-relative. */
+export function atrAt(ctx: AnalysisContext, i: number): number | undefined {
+  const value = ctx.atr[i];
+  return value !== undefined && value > 0 ? value : undefined;
+}
+
+export function requireAtr(ctx: AnalysisContext, i: number): number | Outcome {
+  const atr = atrAt(ctx, i);
+  return atr ?? fail("ATR(14) unavailable — not enough warm-up bars before this row");
+}
+
+export function isAtr(value: number | Outcome): value is number {
+  return typeof value === "number";
+}
+
+/** Candle body / wick geometry, computed from OHLC (never from wick % columns). */
+export function geometry(c: Candle) {
+  const body = Math.abs(c.close! - c.open!);
+  const upper = c.high! - Math.max(c.open!, c.close!);
+  const lower = Math.min(c.open!, c.close!) - c.low!;
+  return { body, upper, lower, range: c.high! - c.low! };
+}
+
+export function reliable(c: Candle): boolean {
+  return c.isReliable !== false;
+}
+
+/** All confirmed pivot levels (both kinds) usable as key levels at bar i. */
+export function keyLevels(ctx: AnalysisContext, i: number): Pivot[] {
+  return [...confirmedBefore(ctx.pivotHighs, i), ...confirmedBefore(ctx.pivotLows, i)].sort(
+    (a, b) => a.index - b.index,
+  );
+}
+
+/** Nearest structure target strictly beyond the entry, in trade direction. */
+export function targetAbove(ctx: AnalysisContext, i: number, price: number): number | undefined {
+  return (
+    nearestAbove(ctx.pivotHighs, i, price)?.price ?? nearestAbove(ctx.pivotLows, i, price)?.price
+  );
+}
+
+export function targetBelow(ctx: AnalysisContext, i: number, price: number): number | undefined {
+  return (
+    nearestBelow(ctx.pivotLows, i, price)?.price ?? nearestBelow(ctx.pivotHighs, i, price)?.price
+  );
+}
+
+/** Nearest key level to `price` within `tolerance` (absolute, ATR-derived). */
+export function levelNear(
+  levels: Pivot[],
+  price: number,
+  tolerance: number,
+): Pivot | undefined {
+  let best: Pivot | undefined;
+  let bestDistance = Infinity;
+  for (const level of levels) {
+    const distance = Math.abs(price - level.price);
+    if (distance <= tolerance && distance < bestDistance) {
+      best = level;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 /** Nearest swing level (high or low) to a price, within tolerance percent. */
 export function nearestLevel(
   swings: SwingSet,
@@ -102,43 +168,14 @@ export function nearestLevel(
   return best;
 }
 
-/** Nearest swing high strictly above `price`, taken from a real row. */
+/** Lowest swing high strictly above `price`, taken from a real row. */
 export function structureAbove(swings: SwingSet, price: number): number | undefined {
   const above = swings.highs.filter((h) => h > price).sort((a, b) => a - b);
   return above[0];
 }
 
-/** Nearest swing low strictly below `price`, taken from a real row. */
 export function structureBelow(swings: SwingSet, price: number): number | undefined {
   const below = swings.lows.filter((l) => l < price).sort((a, b) => b - a);
-  return below[0];
-}
-
-/**
- * Nearest structural level (swing high OR low) strictly above `price`.
- * TP must target the NEAREST opposing level after entry, never the most
- * extreme one found anywhere in the dataset.
- */
-export function nearestLevelAbove(
-  swings: SwingSet,
-  price: number,
-  extra: number[] = [],
-): number | undefined {
-  const above = [...swings.highs, ...swings.lows, ...extra]
-    .filter((v) => Number.isFinite(v) && v > price)
-    .sort((a, b) => a - b);
-  return above[0];
-}
-
-/** Nearest structural level (swing high OR low) strictly below `price`. */
-export function nearestLevelBelow(
-  swings: SwingSet,
-  price: number,
-  extra: number[] = [],
-): number | undefined {
-  const below = [...swings.highs, ...swings.lows, ...extra]
-    .filter((v) => Number.isFinite(v) && v < price)
-    .sort((a, b) => b - a);
   return below[0];
 }
 
